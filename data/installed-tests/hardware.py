@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/python
 # pylint: disable=wrong-import-position,too-many-locals,unused-argument,wrong-import-order
 #
 # Copyright (C) 2017 Richard Hughes <richard@hughsie.com>
