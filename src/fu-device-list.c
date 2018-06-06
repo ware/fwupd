@@ -340,6 +340,14 @@ fu_device_list_add_missing_guids (FuDevice *device_new, FuDevice *device_old)
 	}
 }
 
+static void
+fu_device_list_unref_warn_cb (gpointer data, GObject *dead_object)
+{
+	FuDeviceItem *item = (FuDeviceItem *) data;
+	g_critical ("device refcount fell to zero too early");
+	item->device = NULL;
+}
+
 /**
  * fu_device_list_add:
  * @self: A #FuDeviceList
@@ -431,8 +439,16 @@ fu_device_list_add (FuDeviceList *self, FuDevice *device)
 		}
 
 		/* assign the new device */
+		if (item->device) {
+			g_object_weak_unref (G_OBJECT (item->device),
+					     fu_device_list_unref_warn_cb, item);
+		}
 		g_set_object (&item->device_old, item->device);
 		g_set_object (&item->device, device);
+		if (item->device) {
+			g_object_weak_ref (G_OBJECT (item->device),
+					   fu_device_list_unref_warn_cb, item);
+		}
 		fu_device_list_emit_device_changed (self, device);
 		return;
 	}
@@ -442,6 +458,11 @@ fu_device_list_add (FuDeviceList *self, FuDevice *device)
 	item->self = self; /* no ref */
 	item->device = g_object_ref (device);
 	g_ptr_array_add (self->devices, item);
+
+	/* be notifed early that one of the plugins did something bad */
+	g_object_weak_ref (G_OBJECT (device), fu_device_list_unref_warn_cb, item);
+
+	/* emit to clients */
 	fu_device_list_emit_device_added (self, device);
 }
 
@@ -530,7 +551,11 @@ fu_device_list_item_free (FuDeviceItem *item)
 		g_source_remove (item->remove_id);
 	if (item->device_old != NULL)
 		g_object_unref (item->device_old);
-	g_object_unref (item->device);
+	if (item->device != NULL) {
+		g_object_weak_unref (G_OBJECT (item->device),
+				     fu_device_list_unref_warn_cb, item);
+		g_object_unref (item->device);
+	}
 	g_free (item);
 }
 
