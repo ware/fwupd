@@ -35,11 +35,6 @@ G_DEFINE_AUTOPTR_CLEANUP_FUNC(GUnixMountEntry, g_unix_mount_free)
 #pragma clang diagnostic pop
 #endif
 
-/* drop when upgrading minimum required version of efivar to 33 */
-#if !defined (efi_guid_ux_capsule)
-#define efi_guid_ux_capsule EFI_GUID(0x3b8c8162,0x188c,0x46a4,0xaec9,0xbe,0x43,0xf1,0xd6,0x56,0x97)
-#endif
-
 void
 fu_plugin_init (FuPlugin *plugin)
 {
@@ -173,7 +168,7 @@ fu_plugin_uefi_write_splash_data (FuPlugin *plugin, GBytes *blob, GError **error
 	gsize buf_size = 0;
 	gssize size;
 	guint32 height, width;
-	ux_capsule_header_t header;
+	efi_ux_capsule_header_t header;
 	efi_capsule_header_t capsule_header = {
 		.flags = CAPSULE_FLAGS_PERSIST_ACROSS_RESET,
 		.guid = efi_guid_ux_capsule,
@@ -202,7 +197,8 @@ fu_plugin_uefi_write_splash_data (FuPlugin *plugin, GBytes *blob, GError **error
 	if (!fu_common_mkdir_parent (fn, error))
 		return FALSE;
 	ofile = g_file_new_for_path (fn);
-	ostream = G_OUTPUT_STREAM (g_file_replace (ofile, NULL, FALSE, G_FILE_CREATE_NONE, NULL, error));
+	ostream = G_OUTPUT_STREAM (g_file_replace (ofile, NULL, FALSE,
+				   G_FILE_CREATE_NONE, NULL, error));
 	if (ostream == NULL)
 		return FALSE;
 
@@ -220,7 +216,8 @@ fu_plugin_uefi_write_splash_data (FuPlugin *plugin, GBytes *blob, GError **error
 				fu_uefi_bgrt_get_height (data->bgrt);
 
 	/* write capsule file */
-	size = g_output_stream_write (ostream, &capsule_header, capsule_header.header_size, NULL, error);
+	size = g_output_stream_write (ostream, &capsule_header,
+				      capsule_header.header_size, NULL, error);
 	if (size < 0)
 		return FALSE;
 	size = g_output_stream_write (ostream, &header, sizeof(header), NULL, error);

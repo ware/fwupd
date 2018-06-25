@@ -37,14 +37,38 @@ G_BEGIN_DECLS
 #define CAPSULE_FLAGS_POPULATE_SYSTEM_TABLE	0x00020000
 #define CAPSULE_FLAGS_INITIATE_RESET		0x00040000
 
-typedef struct {
+typedef struct  __attribute__((__packed__)) {
+	guint16		 year;
+	guint8		 month;
+	guint8		 day;
+	guint8		 hour;
+	guint8		 minute;
+	guint8		 second;
+	guint8		 pad1;
+	guint32		 nanosecond;
+	guint16		 timezone;
+	guint8		 daylight;
+	guint8		 pad2;
+} efi_time_t;
+
+typedef struct __attribute__((__packed__)) {
 	efi_guid_t	 guid;
 	guint32		 header_size;
 	guint32		 flags;
 	guint32		 capsule_image_size;
 } efi_capsule_header_t;
 
-typedef struct  __attribute__((__packed__)) {
+typedef struct __attribute__((__packed__)) {
+	guint8		 version;
+	guint8		 checksum;
+	guint8		 image_type;
+	guint8		 reserved;
+	guint32		 mode;
+	guint32		 x_offset;
+	guint32		 y_offset;
+} efi_ux_capsule_header_t;
+
+typedef struct __attribute__((__packed__)) {
 	guint32		 update_info_version;
 	efi_guid_t	 guid;
 	guint32		 capsule_flags;
