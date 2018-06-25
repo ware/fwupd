@@ -170,7 +170,7 @@ fu_plugin_uefi_write_splash_data (FuPlugin *plugin, GBytes *blob, GError **error
 	guint32 height, width;
 	efi_ux_capsule_header_t header;
 	efi_capsule_header_t capsule_header = {
-		.flags = CAPSULE_FLAGS_PERSIST_ACROSS_RESET,
+		.flags = EFI_CAPSULE_HEADER_FLAGS_PERSIST_ACROSS_RESET,
 		.guid = efi_guid_ux_capsule,
 		.header_size = sizeof(efi_capsule_header_t),
 		.capsule_image_size = 0

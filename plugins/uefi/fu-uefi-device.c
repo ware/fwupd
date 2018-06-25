@@ -308,7 +308,7 @@ fu_uefi_device_write_firmware (FuDevice *device, GBytes *fw, GError **error)
 
 	/* set the blob header shared with fwup.efi */
 	memset (&info, 0x0, sizeof(info));
-	info.status = FWUPDATE_ATTEMPT_UPDATE;
+	info.status = EFI_UPDATE_INFO_STATUS_ATTEMPT_UPDATE;
 	info.capsule_flags = self->capsule_flags;
 	if (efi_guid_to_str (&info.guid, &self->fw_class) < 0) {
 		g_set_error_literal (error,

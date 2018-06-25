@@ -12,30 +12,16 @@
 #include <glib.h>
 #include <efivar.h>
 
-typedef struct {
-	guint16 year;
-	guint8 month;
-	guint8 day;
-	guint8 hour;
-	guint8 minute;
-	guint8 second;
-	guint8 pad1;
-	guint32 nanosecond;
-	guint16 timezone;
-	guint8 daylight;
-	guint8 pad2;
-} efi_time_t;
-#define EFI_TIME efi_time_t
-
-#include "efi/fwup-efi.h"
-
 G_BEGIN_DECLS
 
 #define FWUPDATE_GUID EFI_GUID(0x0abba7dc,0xe516,0x4167,0xbbf5,0x4d,0x9d,0x1c,0x73,0x94,0x16)
 
-#define CAPSULE_FLAGS_PERSIST_ACROSS_RESET	0x00010000
-#define CAPSULE_FLAGS_POPULATE_SYSTEM_TABLE	0x00020000
-#define CAPSULE_FLAGS_INITIATE_RESET		0x00040000
+#define EFI_CAPSULE_HEADER_FLAGS_PERSIST_ACROSS_RESET	0x00010000
+#define EFI_CAPSULE_HEADER_FLAGS_POPULATE_SYSTEM_TABLE	0x00020000
+#define EFI_CAPSULE_HEADER_FLAGS_INITIATE_RESET		0x00040000
+
+#define EFI_UPDATE_INFO_STATUS_ATTEMPT_UPDATE		0x00000001
+#define EFI_UPDATE_INFO_STATUS_ATTEMPTED		0x00000002
 
 typedef struct  __attribute__((__packed__)) {
 	guint16		 year;
