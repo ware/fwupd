@@ -13,8 +13,16 @@
 
 G_BEGIN_DECLS
 
-#define FU_UEFI_EFI_GLOBAL_GUID			"8be4df61-93ca-11d2-aa0d-00e098032b8c"
-#define FU_UEFI_FWUPDATE_GUID			"0abba7dc-e516-4167-bbf5-4d9d1c739416"
+#define FU_UEFI_VARS_GUID_EFI_GLOBAL			"8be4df61-93ca-11d2-aa0d-00e098032b8c"
+#define FU_UEFI_VARS_GUID_FWUPDATE			"0abba7dc-e516-4167-bbf5-4d9d1c739416"
+
+#define FU_UEFI_VARS_ATTR_NON_VOLATILE			(1 << 0)
+#define FU_UEFI_VARS_ATTR_BOOTSERVICE_ACCESS		(1 << 1)
+#define FU_UEFI_VARS_ATTR_RUNTIME_ACCESS		(1 << 2)
+#define FU_UEFI_VARS_ATTR_HARDWARE_ERROR_RECORD		(1 << 3)
+#define FU_UEFI_VARS_ATTR_AUTHENTICATED_WRITE_ACCESS	(1 << 4)
+#define FU_UEFI_VARS_ATTR_TIME_BASED_AUTHENTICATED_WRITE_ACCESS (5 << 0)
+#define FU_UEFI_VARS_ATTR_APPEND_WRITE			(1 << 6)
 
 gboolean	 fu_uefi_vars_supported		(GError		**error);
 gboolean	 fu_uefi_vars_exists		(const gchar	*guid,
@@ -22,12 +30,14 @@ gboolean	 fu_uefi_vars_exists		(const gchar	*guid,
 gboolean	 fu_uefi_vars_get_data		(const gchar	*guid,
 						 const gchar	*name,
 						 guint8		**data,
-						 gsize		*sz,
+						 gsize		*data_sz,
+						 guint32	*attr,
 						 GError		**error);
 gboolean	 fu_uefi_vars_set_data		(const gchar	*guid,
 						 const gchar	*name,
 						 const guint8	*data,
 						 gsize		 sz,
+						 guint32	 attr,
 						 GError		**error);
 gboolean	 fu_uefi_vars_delete		(const gchar	*guid,
 						 const gchar	*name,

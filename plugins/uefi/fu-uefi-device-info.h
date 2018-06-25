@@ -40,9 +40,9 @@ FuUefiDeviceInfo *fu_uefi_device_info_new		(const gchar	*guidstr,
 							 GError		**error);
 gboolean	 fu_uefi_device_info_update		(FuUefiDeviceInfo *info,
 							 GError		**error);
-gchar		*fu_uefi_device_info_get_media_path	(const gchar	*esp_path,
-							 FuUefiDeviceInfo *info);
-gboolean	 fu_uefi_device_info_set_device_path	(FuUefiDeviceInfo *info,
+gchar		*fu_uefi_device_info_get_capsule_fn	(FuUefiDeviceInfo *info,
+							 const gchar	*esp_path);
+gboolean	 fu_uefi_device_info_set_capsule_fn	(FuUefiDeviceInfo *info,
 							 const gchar	*path,
 							 GError		**error);
 void		 fu_uefi_device_info_free		(FuUefiDeviceInfo *info);

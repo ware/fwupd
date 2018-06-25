@@ -14,7 +14,7 @@
 
 G_BEGIN_DECLS
 
-gboolean	 fu_uefi_setup_bootnext		(const gchar	*esp_mountpoint,
+gboolean	 fu_uefi_setup_bootnext		(const gchar	*esp_path,
 						 GError		**error);
 
 G_END_DECLS

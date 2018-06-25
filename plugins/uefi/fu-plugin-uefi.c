@@ -199,7 +199,7 @@ fu_plugin_uefi_write_splash_data (FuPlugin *plugin, GBytes *blob, GError **error
 	}
 
 	/* save to a predicatable filename */
-	fn = fu_uefi_device_info_get_media_path (data->esp_path, &info);
+	fn = fu_uefi_device_info_get_capsule_fn (&info, data->esp_path);
 	ofile = g_file_new_for_path (fn);
 	ostream = G_OUTPUT_STREAM (g_file_replace (ofile, NULL, FALSE, G_FILE_CREATE_NONE, NULL, error));
 	if (ostream == NULL)
@@ -603,7 +603,6 @@ fu_plugin_startup (FuPlugin *plugin, GError **error)
 				     "Invalid %s specified in %s config: %s",
 				     fu_plugin_get_name (plugin), key,
 				     data->esp_path);
-
 			return FALSE;
 		}
 	}
@@ -625,12 +624,12 @@ fu_plugin_startup (FuPlugin *plugin, GError **error)
 	/* delete any existing .cap files to avoid the small ESP partition
 	 * from running out of space when we've done lots of firmware updates
 	 * -- also if the distro has changed the ESP may be different anyway */
-	if (fu_uefi_vars_exists (FU_UEFI_EFI_GLOBAL_GUID, "BootNext")) {
+	if (fu_uefi_vars_exists (FU_UEFI_VARS_GUID_EFI_GLOBAL, "BootNext")) {
 		g_debug ("detected BootNext, not cleaning up");
 	} else {
 		if (!fu_plugin_uefi_delete_old_capsules (plugin, error))
 			return FALSE;
-		if (!fu_uefi_vars_delete_with_glob (FU_UEFI_FWUPDATE_GUID, "fwupdate-*", error))
+		if (!fu_uefi_vars_delete_with_glob (FU_UEFI_VARS_GUID_FWUPDATE, "fwupdate-*", error))
 			return FALSE;
 	}
 

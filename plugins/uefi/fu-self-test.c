@@ -15,6 +15,7 @@
 #include "fu-uefi-bgrt.h"
 #include "fu-uefi-common.h"
 #include "fu-uefi-device.h"
+#include "fu-uefi-device-info.h"
 #include "fu-uefi-vars.h"
 
 static void
@@ -112,6 +113,7 @@ fu_uefi_vars_func (void)
 {
 	gboolean ret;
 	gsize sz = 0;
+	guint32 attr = 0;
 	g_autofree guint8 *data = NULL;
 	g_autoptr(GError) error = NULL;
 
@@ -121,41 +123,48 @@ fu_uefi_vars_func (void)
 	g_assert_true (ret);
 
 	/* check existing keys */
-	g_assert_false (fu_uefi_vars_exists (FU_UEFI_EFI_GLOBAL_GUID, "NotGoingToExist"));
-	g_assert_true (fu_uefi_vars_exists (FU_UEFI_EFI_GLOBAL_GUID, "SecureBoot"));
+	g_assert_false (fu_uefi_vars_exists (FU_UEFI_VARS_GUID_EFI_GLOBAL, "NotGoingToExist"));
+	g_assert_true (fu_uefi_vars_exists (FU_UEFI_VARS_GUID_EFI_GLOBAL, "SecureBoot"));
 
 	/* write and read a key */
-	ret = fu_uefi_vars_set_data (FU_UEFI_EFI_GLOBAL_GUID, "Test", (guint8 *)"1", 1, &error);
+	ret = fu_uefi_vars_set_data (FU_UEFI_VARS_GUID_EFI_GLOBAL, "Test",
+				     (guint8 *) "1", 1,
+				     FU_UEFI_VARS_ATTR_NON_VOLATILE |
+				     FU_UEFI_VARS_ATTR_RUNTIME_ACCESS,
+				     &error);
 	g_assert_no_error (error);
 	g_assert_true (ret);
-	ret = fu_uefi_vars_get_data (FU_UEFI_EFI_GLOBAL_GUID, "Test", &data, &sz, &error);
+	ret = fu_uefi_vars_get_data (FU_UEFI_VARS_GUID_EFI_GLOBAL, "Test",
+				     &data, &sz, &attr, &error);
 	g_assert_no_error (error);
 	g_assert_true (ret);
 	g_assert_cmpint (sz, ==, 1);
+	g_assert_cmpint (attr, ==, FU_UEFI_VARS_ATTR_NON_VOLATILE |
+				   FU_UEFI_VARS_ATTR_RUNTIME_ACCESS);
 	g_assert_cmpint (data[0], ==, '1');
 
 	/* delete single key */
-	ret = fu_uefi_vars_delete (FU_UEFI_EFI_GLOBAL_GUID, "Test", &error);
+	ret = fu_uefi_vars_delete (FU_UEFI_VARS_GUID_EFI_GLOBAL, "Test", &error);
 	g_assert_no_error (error);
 	g_assert_true (ret);
-	g_assert_false (fu_uefi_vars_exists (FU_UEFI_EFI_GLOBAL_GUID, "Test"));
+	g_assert_false (fu_uefi_vars_exists (FU_UEFI_VARS_GUID_EFI_GLOBAL, "Test"));
 
 	/* delete multiple keys */
-	ret = fu_uefi_vars_set_data (FU_UEFI_EFI_GLOBAL_GUID, "Test1", (guint8 *)"1", 1, &error);
+	ret = fu_uefi_vars_set_data (FU_UEFI_VARS_GUID_EFI_GLOBAL, "Test1", (guint8 *)"1", 1, 0, &error);
 	g_assert_no_error (error);
 	g_assert_true (ret);
-	ret = fu_uefi_vars_set_data (FU_UEFI_EFI_GLOBAL_GUID, "Test2", (guint8 *)"1", 1, &error);
+	ret = fu_uefi_vars_set_data (FU_UEFI_VARS_GUID_EFI_GLOBAL, "Test2", (guint8 *)"1", 1, 0, &error);
 	g_assert_no_error (error);
 	g_assert_true (ret);
-	ret = fu_uefi_vars_delete_with_glob (FU_UEFI_EFI_GLOBAL_GUID, "Test*", &error);
+	ret = fu_uefi_vars_delete_with_glob (FU_UEFI_VARS_GUID_EFI_GLOBAL, "Test*", &error);
 	g_assert_no_error (error);
 	g_assert_true (ret);
-	g_assert_false (fu_uefi_vars_exists (FU_UEFI_EFI_GLOBAL_GUID, "Test1"));
-	g_assert_false (fu_uefi_vars_exists (FU_UEFI_EFI_GLOBAL_GUID, "Test2"));
+	g_assert_false (fu_uefi_vars_exists (FU_UEFI_VARS_GUID_EFI_GLOBAL, "Test1"));
+	g_assert_false (fu_uefi_vars_exists (FU_UEFI_VARS_GUID_EFI_GLOBAL, "Test2"));
 
 	/* read a key that doesn't exist */
-	ret = fu_uefi_vars_get_data (FU_UEFI_EFI_GLOBAL_GUID, "NotGoingToExist", NULL, NULL, &error);
-	g_assert_error (error, G_FILE_ERROR, G_FILE_ERROR_NOENT);
+	ret = fu_uefi_vars_get_data (FU_UEFI_VARS_GUID_EFI_GLOBAL, "NotGoingToExist", NULL, NULL, NULL, &error);
+	g_assert_error (error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND);
 	g_assert_false (ret);
 }
 
@@ -204,6 +213,68 @@ fu_uefi_plugin_func (void)
 	g_assert_cmpint (fu_uefi_device_get_status (dev), ==, FU_UEFI_DEVICE_STATUS_SUCCESS);
 }
 
+static void
+fu_uefi_device_info_func (void)
+{
+//	gboolean ret;
+	g_autofree gchar *capsule_fn2 = NULL;
+	g_autofree gchar *capsule_fn = NULL;
+	g_autofree gchar *capsule_fn_old = NULL;
+	g_autofree gchar *capsule_fn_os = NULL;
+	g_autofree gchar *capsule_fn_tmp = NULL;
+	g_autoptr(FuUefiDeviceInfo) info2 = NULL;
+	g_autoptr(FuUefiDeviceInfo) info = NULL;
+	g_autoptr(GError) error = NULL;
+
+	/* ensure clean */
+	fu_uefi_vars_delete (FU_UEFI_VARS_GUID_FWUPDATE,
+			     "fwupdate-ddc0ee61-e7f0-4e7d-acc5-c070a398838e-0",
+			     NULL);
+
+	/* this isn't going to exist, so create it */
+	info = fu_uefi_device_info_new ("ddc0ee61-e7f0-4e7d-acc5-c070a398838e",
+					0 /* hw-inst */, &error);
+	g_assert_no_error (error);
+	g_assert_nonnull (info);
+	g_assert_cmpint (info->status, ==, 0);
+	g_assert_cmpint (info->hw_inst, ==, 0);
+
+	/* get the esp filename */
+	capsule_fn = fu_uefi_device_info_get_capsule_fn (info, TESTDATADIR);
+	capsule_fn_os = fu_uefi_get_esp_path_for_os (TESTDATADIR);
+	capsule_fn_tmp = g_build_filename (capsule_fn_os, "fw",
+					   "fwupdate-ddc0ee61-e7f0-4e7d-acc5-c070a398838e.cap",
+					   NULL);
+	g_assert_cmpstr (capsule_fn, ==, capsule_fn_tmp);
+
+#if 0
+	/* set a new device path */
+	capsule_fn_old = g_build_filename (capsule_fn_os, "fw", "old.cap", NULL);
+	ret = fu_uefi_device_info_set_capsule_fn (info, capsule_fn_old, &error);
+	g_assert_no_error (error);
+	g_assert_true (ret);
+	ret = fu_uefi_device_info_update (info, &error);
+	g_assert_no_error (error);
+	g_assert_true (ret);
+
+	/* get the saved device path */
+	info2 = fu_uefi_device_info_new ("ddc0ee61-e7f0-4e7d-acc5-c070a398838e",
+					 0 /* hw-inst */, &error);
+	g_assert_no_error (error);
+	g_assert_nonnull (info2);
+	capsule_fn2 = fu_uefi_device_info_get_capsule_fn (info2, TESTDATADIR);
+	g_assert_cmpstr (capsule_fn2, ==, capsule_fn_old);
+
+	/* delete the saved mapping */
+	ret = fu_uefi_vars_delete (FU_UEFI_VARS_GUID_FWUPDATE,
+				   "fwupdate-ddc0ee61-e7f0-4e7d-acc5-c070a398838e-0",
+				   &error);
+	g_assert_no_error (error);
+	g_assert_true (ret);
+
+#endif
+}
+
 int
 main (int argc, char **argv)
 {
@@ -221,6 +292,7 @@ main (int argc, char **argv)
 	g_test_add_func ("/uefi/framebuffer", fu_uefi_framebuffer_func);
 	g_test_add_func ("/uefi/bitmap", fu_uefi_bitmap_func);
 	g_test_add_func ("/uefi/device", fu_uefi_device_func);
+	g_test_add_func ("/uefi/device-info", fu_uefi_device_info_func);
 	g_test_add_func ("/uefi/plugin", fu_uefi_plugin_func);
 	return g_test_run ();
 }

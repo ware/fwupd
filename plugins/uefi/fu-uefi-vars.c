@@ -82,27 +82,76 @@ fu_uefi_vars_exists (const gchar *guid, const gchar *name)
 }
 
 gboolean
-fu_uefi_vars_get_data (const gchar *guid, const gchar *name,
-		       guint8 **data, gsize *sz, GError **error)
+fu_uefi_vars_get_data (const gchar *guid, const gchar *name, guint8 **data,
+		       gsize *data_sz, guint32 *attr, GError **error)
 {
+	gssize attr_sz;
+	gssize data_sz_tmp;
+	guint32 attr_tmp;
+	guint64 sz;
 	g_autofree gchar *fn = fu_uefi_vars_get_filename (guid, name);
-	g_autofree gchar *data_tmp = NULL;
-	if (!g_file_get_contents (fn, &data_tmp, sz, error))
+	g_autoptr(GFile) file = g_file_new_for_path (fn);
+	g_autoptr(GFileInfo) info = NULL;
+	g_autoptr(GInputStream) istr = NULL;
+
+	/* open file as stream */
+	istr = G_INPUT_STREAM (g_file_read (file, NULL, error));
+	if (istr == NULL)
 		return FALSE;
-	if (data != NULL)
+	info = g_file_input_stream_query_info (G_FILE_INPUT_STREAM (istr),
+					       G_FILE_ATTRIBUTE_STANDARD_SIZE,
+					       NULL, error);
+	if (istr == NULL) {
+		g_prefix_error (error, "failed to get stream info: ");
+		return FALSE;
+	}
+
+	/* get total stream size */
+	sz = g_file_info_get_attribute_uint64 (info, G_FILE_ATTRIBUTE_STANDARD_SIZE);
+	if (sz < 4) {
+		g_set_error (error,
+			     G_IO_ERROR,
+			     G_IO_ERROR_INVALID_DATA,
+			     "efivars file too small: %" G_GUINT64_FORMAT, sz);
+		return FALSE;
+	}
+
+	/* read out the attributes */
+	attr_sz = g_input_stream_read (istr, &attr_tmp, sizeof(attr_tmp), NULL, error);
+	if (attr_sz == -1) {
+		g_prefix_error (error, "failed to read attr: ");
+		return FALSE;
+	}
+	if (attr != NULL)
+		*attr = attr_tmp;
+
+	/* read out the data */
+	data_sz_tmp = sz - sizeof(attr_tmp);
+	if (data_sz != NULL)
+		*data_sz = data_sz_tmp;
+	if (data != NULL) {
+		g_autofree gchar *data_tmp = g_malloc0 (data_sz_tmp);
+		if (!g_input_stream_read_all (istr, data_tmp, data_sz_tmp,
+					      NULL, NULL, error)) {
+			g_prefix_error (error, "failed to read data: ");
+			return FALSE;
+		}
 		*data = g_steal_pointer (&data_tmp);
+	}
 	return TRUE;
 }
 
 gboolean
-fu_uefi_vars_set_data (const gchar *guid, const gchar *name,
-		       const guint8 *data, gsize sz, GError **error)
+fu_uefi_vars_set_data (const gchar *guid, const gchar *name, const guint8 *data,
+		       gsize data_sz, guint32 attr, GError **error)
 {
 	g_autofree gchar *fn = fu_uefi_vars_get_filename (guid, name);
 	g_autoptr(GFile) file = g_file_new_for_path (fn);
-	g_autoptr(GFileOutputStream) stream = NULL;
-	stream = g_file_replace (file, NULL, FALSE, G_FILE_CREATE_NONE, NULL, error);
-	if (stream == NULL)
+	g_autoptr(GFileOutputStream) ostr = NULL;
+	ostr = g_file_replace (file, NULL, FALSE, G_FILE_CREATE_NONE, NULL, error);
+	if (ostr == NULL)
 		return FALSE;
-	return g_output_stream_write (G_OUTPUT_STREAM (stream), data, sz, NULL, error) != -1;
+	if (g_output_stream_write (G_OUTPUT_STREAM (ostr), &attr, sizeof(attr), NULL, error) == -1)
+		return FALSE;
+	return g_output_stream_write (G_OUTPUT_STREAM (ostr), data, data_sz, NULL, error) != -1;
 }

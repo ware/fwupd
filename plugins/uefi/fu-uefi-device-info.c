@@ -15,17 +15,26 @@
 #include "fu-ucs2.h"
 #include "fu-uefi-common.h"
 #include "fu-uefi-device-info.h"
+#include "fu-uefi-vars.h"
+
+static gchar *
+fu_uefi_device_info_build_varname (const gchar *guidstr, guint64 hw_inst)
+{
+	return g_strdup_printf ("fwupdate-%s-%"G_GUINT64_FORMAT, guidstr, hw_inst);
+}
 
 gboolean
 fu_uefi_device_info_update (FuUefiDeviceInfo *info, GError **error)
 {
 	const guint64 hw_inst = 0;
 	efi_guid_t guid;
-	gchar *varname;
-	gssize dps;
+	gssize dp_sz;
 	gssize info2_sz;
 	g_autofree FuUefiDeviceInfo *info2 = NULL;
 	g_autofree gchar *guidstr = NULL;
+	g_autofree gchar *varname = NULL;
+
+	g_return_val_if_fail (info != NULL, FALSE);
 
 	/* key name */
 	memcpy (&guid, &info->guid, sizeof(guid));
@@ -36,44 +45,40 @@ fu_uefi_device_info_update (FuUefiDeviceInfo *info, GError **error)
 				     "failed to get convert GUID");
 		return FALSE;
 	}
-	varname = g_strdup_printf ("fwupdate-%s-%"G_GUINT64_FORMAT, guidstr, hw_inst);
 
-	/* make sure dps is at least big enough to have our structure */
-	dps = efidp_size ((efidp)info->dp_ptr);
-	if (dps < 0 || (gsize) dps < sizeof(FuUefiDeviceInfo)) {
-		g_set_error_literal (error,
-				     FWUPD_ERROR,
-				     FWUPD_ERROR_NOT_SUPPORTED,
-				     "EFI DP size impossible");
-		return FALSE;
-	}
-
-	/* make sure sizeof(*info) + dps won't integer overflow */
-	if (((gsize)dps >= SSIZE_MAX - sizeof(FuUefiDeviceInfo)) ||
-	    ((gssize)dps > sysconf (_SC_PAGESIZE) * 100)) {
+	/* make sure dp_sz is at least big enough to have our structure: FIXME? really? */
+	dp_sz = efidp_size ((efidp)info->dp_ptr);
+	if (dp_sz < 0 || (gsize) dp_sz < sizeof(FuUefiDeviceInfo)) {
 		g_set_error (error,
 			     FWUPD_ERROR,
 			     FWUPD_ERROR_NOT_SUPPORTED,
-			     "device path size (%zd) would overflow", dps);
+			     "EFI DP size %" G_GSSIZE_FORMAT " impossible",
+			     dp_sz);
+		return FALSE;
+	}
+
+	/* make sure sizeof(*info) + dp_sz won't integer overflow */
+	if (((gsize)dp_sz >= SSIZE_MAX - sizeof(FuUefiDeviceInfo)) ||
+	    ((gssize)dp_sz > sysconf (_SC_PAGESIZE) * 100)) {
+		g_set_error (error,
+			     FWUPD_ERROR,
+			     FWUPD_ERROR_NOT_SUPPORTED,
+			     "device path size (%zd) would overflow", dp_sz);
 		return FALSE;
 	}
 
 	/* create new info and save to EFI vars */
-	info2_sz = sizeof(FuUefiDeviceInfo) + dps - sizeof(info->dp_ptr);
+	info2_sz = sizeof(FuUefiDeviceInfo) + dp_sz - sizeof(info->dp_ptr);
 	info2 = g_malloc0 (info2_sz);
 	memcpy (info2, info, sizeof(FuUefiDeviceInfo));
-	memcpy (info2->dp_buf, info->dp_ptr, dps);
-	if (efi_set_variable (FWUPDATE_GUID, varname, (guint8 *)info2, info2_sz,
-			      EFI_VARIABLE_NON_VOLATILE |
-			      EFI_VARIABLE_BOOTSERVICE_ACCESS |
-			      EFI_VARIABLE_RUNTIME_ACCESS, 0644) < 0) {
-		g_set_error (error,
-			     FWUPD_ERROR,
-			     FWUPD_ERROR_NOT_SUPPORTED,
-			     "efi_set_variable(%s) failed", varname);
-		return FALSE;
-	}
-	return TRUE;
+	memcpy (info2->dp_ptr, info->dp_ptr, dp_sz);
+	varname = fu_uefi_device_info_build_varname (guidstr, hw_inst);
+	return fu_uefi_vars_set_data (FU_UEFI_VARS_GUID_FWUPDATE, varname,
+				      (guint8 *) info2, info2_sz,
+				      FU_UEFI_VARS_ATTR_NON_VOLATILE |
+				      FU_UEFI_VARS_ATTR_BOOTSERVICE_ACCESS |
+				      FU_UEFI_VARS_ATTR_RUNTIME_ACCESS,
+				      error);
 }
 
 FuUefiDeviceInfo *
@@ -83,25 +88,15 @@ fu_uefi_device_info_new (const gchar *guidstr, guint64 hw_inst, GError **error)
 	efidp_header *dp;
 	gsize data_size = 0;
 	gssize sz;
-	guint32 attributes;
 	g_autofree gchar *varname = NULL;
 	g_autofree guint8 *data = NULL;
 
 	g_return_val_if_fail (guidstr != NULL, NULL);
 
-	varname = g_strdup_printf ("fwupdate-%s-%"G_GUINT64_FORMAT, guidstr, hw_inst);
-	if (efi_get_variable (FWUPDATE_GUID, varname,
-			      &data, &data_size, &attributes) < 0) {
+	varname = fu_uefi_device_info_build_varname (guidstr, hw_inst);
+	if (!fu_uefi_vars_get_data (FU_UEFI_VARS_GUID_FWUPDATE, varname,
+				    &data, &data_size, NULL, NULL)) {
 		efi_guid_t guid;
-		if (errno != ENOENT) {
-			g_set_error (error,
-				     FWUPD_ERROR,
-				     FWUPD_ERROR_NOT_SUPPORTED,
-				     "failed to get EFI variable %s",
-				     varname);
-			return NULL;
-		}
-		efi_error_clear ();
 
 		/* convert to packed version */
 		if (efi_str_to_guid (guidstr, &guid) < 0) {
@@ -135,12 +130,8 @@ fu_uefi_device_info_new (const gchar *guidstr, guint64 hw_inst, GError **error)
 	 * the variable and create a new one. */
 	if (data_size < sizeof (FuUefiDeviceInfo) || data == NULL) {
 		g_debug ("uefi saved state size mismatch");
-		if (efi_del_variable (FWUPDATE_GUID, varname) < 0) {
-			g_set_error (error,
-				     FWUPD_ERROR,
-				     FWUPD_ERROR_NOT_SUPPORTED,
-				     "failed to delete EFI variable %s",
-				     varname);
+		if (!fu_uefi_vars_delete (FU_UEFI_VARS_GUID_FWUPDATE, varname, error)) {
+			g_prefix_error (error, "failed to delete EFI variable %s", varname);
 			return NULL;
 		}
 		return fu_uefi_device_info_new (guidstr, hw_inst, error);
@@ -150,12 +141,8 @@ fu_uefi_device_info_new (const gchar *guidstr, guint64 hw_inst, GError **error)
 	info = (FuUefiDeviceInfo *)data;
 	if (info->update_info_version != UPDATE_INFO_VERSION) {
 		g_debug ("uefi saved state version mismatch");
-		if (efi_del_variable (FWUPDATE_GUID, varname) < 0) {
-			g_set_error (error,
-				     FWUPD_ERROR,
-				     FWUPD_ERROR_NOT_SUPPORTED,
-				     "failed to delete EFI variable %s",
-				     varname);
+		if (!fu_uefi_vars_delete (FU_UEFI_VARS_GUID_FWUPDATE, varname, error)) {
+			g_prefix_error (error, "failed to delete EFI variable %s", varname);
 			return NULL;
 		}
 		return fu_uefi_device_info_new (guidstr, hw_inst, error);
@@ -187,12 +174,11 @@ fu_uefi_device_info_free (FuUefiDeviceInfo *info)
 }
 
 gboolean
-fu_uefi_device_info_set_device_path (FuUefiDeviceInfo *info,
-				     const gchar *path, GError **error)
+fu_uefi_device_info_set_capsule_fn (FuUefiDeviceInfo *info,
+				    const gchar *path, GError **error)
 {
 	gssize req;
 	gssize sz;
-	efidp_header *dp;
 	g_autofree guint8 *dp_buf = NULL;
 
 	/* get the size of the path first */
@@ -219,7 +205,6 @@ fu_uefi_device_info_set_device_path (FuUefiDeviceInfo *info,
 
 	/* actually get the path this time */
 	dp_buf = g_malloc0 (req);
-	dp = (efidp_header *) dp_buf;
 	sz = efi_generate_file_device_path (dp_buf, req, path,
 					    EFIBOOT_OPTIONS_IGNORE_FS_ERROR |
 					    EFIBOOT_ABBREV_HD);
@@ -235,31 +220,32 @@ fu_uefi_device_info_set_device_path (FuUefiDeviceInfo *info,
 	/* info owns this now */
 	if (info->dp_ptr != NULL)
 		g_free (info->dp_ptr);
-	info->dp_ptr = dp;
-	dp_buf = NULL;
+	info->dp_ptr = (efidp_header *) g_steal_pointer (&dp_buf);
 	return TRUE;
 }
 
-static gint
-efidp_end_entire(efidp_header *dp)
+static gboolean
+efidp_end_entire (efidp_header *dp)
 {
-	if (!dp)
-		return 0;
-	if (efidp_type((efidp)dp) != EFIDP_END_TYPE)
-		return 0;
-	if (efidp_subtype((efidp)dp) != EFIDP_END_ENTIRE)
-		return 0;
-	return 1;
+	if (dp == NULL)
+		return FALSE;
+	if (efidp_type ((efidp)dp) != EFIDP_END_TYPE)
+		return FALSE;
+	if (efidp_subtype ((efidp)dp) != EFIDP_END_ENTIRE)
+		return FALSE;
+	return TRUE;
 }
 
 static gchar *
-fu_uefi_device_info_get_existing_media_path (FuUefiDeviceInfo *info)
+fu_uefi_device_info_get_existing_capsule_fn (FuUefiDeviceInfo *info)
 {
 	const_efidp idp;
 	gint rc;
 	guint16 ucs2sz = 0;
 	g_autofree gchar *relpath = NULL;
 	g_autofree guint16 *ucs2file = NULL;
+
+	g_return_val_if_fail (info != NULL, NULL);
 
 	/* never set */
 	if (info->dp_ptr == NULL)
@@ -270,12 +256,12 @@ fu_uefi_device_info_get_existing_media_path (FuUefiDeviceInfo *info)
 	/* find UCS2 string */
 	idp = (const_efidp) info->dp_ptr;
 	while (1) {
-		if (efidp_type(idp) == EFIDP_END_TYPE &&
-				efidp_subtype(idp) == EFIDP_END_ENTIRE)
+		if (efidp_type (idp) == EFIDP_END_TYPE &&
+		    efidp_subtype (idp) == EFIDP_END_ENTIRE)
 			break;
 		if (efidp_type(idp) != EFIDP_MEDIA_TYPE ||
-				efidp_subtype(idp) !=EFIDP_MEDIA_FILE) {
-			rc = efidp_next_node(idp, &idp);
+		    efidp_subtype (idp) != EFIDP_MEDIA_FILE) {
+			rc = efidp_next_node (idp, &idp);
 			if (rc < 0)
 				break;
 			continue;
@@ -295,11 +281,11 @@ fu_uefi_device_info_get_existing_media_path (FuUefiDeviceInfo *info)
 	if (relpath == NULL)
 		return NULL;
 	g_strdelimit (relpath, "\\", '/');
-	return relpath;
+	return g_steal_pointer (&relpath);
 }
 
 gchar *
-fu_uefi_device_info_get_media_path (const gchar *esp_path, FuUefiDeviceInfo *info)
+fu_uefi_device_info_get_capsule_fn (FuUefiDeviceInfo *info, const gchar *esp_path)
 {
 	efi_guid_t guid;
 	g_autofree gchar *basename = NULL;
@@ -308,14 +294,14 @@ fu_uefi_device_info_get_media_path (const gchar *esp_path, FuUefiDeviceInfo *inf
 	g_autofree gchar *media_path = NULL;
 
 	/* we've updated this GUID before */
-	media_path = fu_uefi_device_info_get_existing_media_path (info);
+	media_path = fu_uefi_device_info_get_existing_capsule_fn (info);
 	if (media_path != NULL)
 		return g_build_filename (esp_path, media_path, NULL);
 
 	/* use the default fw path using the GUID in the name */
 	memcpy (&guid, &info->guid, sizeof(guid));
 	efi_guid_to_str (&guid, &guidstr);
-	directory = fu_uefi_get_full_esp_path (esp_path);
+	directory = fu_uefi_get_esp_path_for_os (esp_path);
 	basename = g_strdup_printf ("fwupdate-%s.cap", guidstr);
 	return g_build_filename (directory, "fw", basename, NULL);
 }

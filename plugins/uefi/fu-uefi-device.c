@@ -28,7 +28,6 @@ struct _FuUefiDevice {
 	FuUefiDeviceStatus	 last_attempt_status;
 	guint32			 last_attempt_version;
 	guint64			 fmp_hardware_instance;
-	FuUefiDeviceInfo	*info;
 };
 
 G_DEFINE_TYPE (FuUefiDevice, fu_uefi_device, FU_TYPE_DEVICE)
@@ -161,34 +160,26 @@ fu_uefi_device_get_guid (FuUefiDevice *self)
 	return self->fw_class;
 }
 
-static gboolean
-fu_uefi_device_ensure_info (FuUefiDevice *self, GError **error)
+gboolean
+fu_uefi_device_clear_status (FuUefiDevice *self, GError **error)
 {
+	g_autoptr(FuUefiDeviceInfo) info = NULL;
+
+	g_return_val_if_fail (FU_IS_UEFI_DEVICE (self), FALSE);
+	g_return_val_if_fail (error == NULL || *error == NULL, FALSE);
+
 	if (self->fw_class == NULL) {
 		g_set_error_literal (error,
 				     FWUPD_ERROR,
 				     FWUPD_ERROR_INTERNAL,
-				     "cannot ensure device info with no GUID");
+				     "cannot clear device info with no GUID");
 		return FALSE;
 	}
-	if (self->info != NULL)
-		return TRUE;
-	self->info = fu_uefi_device_info_new (self->fw_class, 0, error);
-	if (self->info == NULL)
+	info = fu_uefi_device_info_new (self->fw_class, 0, error);
+	if (info == NULL)
 		return FALSE;
-	return TRUE;
-}
-
-gboolean
-fu_uefi_device_clear_status (FuUefiDevice *self, GError **error)
-{
-	g_return_val_if_fail (FU_IS_UEFI_DEVICE (self), FALSE);
-	g_return_val_if_fail (error == NULL || *error == NULL, FALSE);
-
-	if (!fu_uefi_device_ensure_info (self, error))
-		return FALSE;
-	self->info->status = FU_UEFI_DEVICE_STATUS_SUCCESS;
-	return fu_uefi_device_info_update (self->info, error);
+	info->status = FU_UEFI_DEVICE_STATUS_SUCCESS;
+	return fu_uefi_device_info_update (info, error);
 }
 
 static gboolean
@@ -197,18 +188,28 @@ fu_uefi_device_write_firmware (FuDevice *device, GBytes *fw, GError **error)
 	FuUefiDevice *self = FU_UEFI_DEVICE (device);
 	const gchar *esp_path = fu_device_get_metadata (device, "EspPath");
 	g_autofree gchar *fn = NULL;
+	g_autoptr(FuUefiDeviceInfo) info = NULL;
+
 
 	/* in the self tests */
 	if (fu_device_get_metadata (device, "UEFI::FakeESP") != NULL)
 		return TRUE;
 
 	/* ensure we have the existing state */
-	if (!fu_uefi_device_ensure_info (self, error))
+	if (self->fw_class == NULL) {
+		g_set_error_literal (error,
+				     FWUPD_ERROR,
+				     FWUPD_ERROR_INTERNAL,
+				     "cannot clear device info with no GUID");
+		return FALSE;
+	}
+	info = fu_uefi_device_info_new (self->fw_class, 0, error);
+	if (info == NULL)
 		return FALSE;
 
 	/* save the blob to either a filename that we've used before for this
 	 * GUID or construct something sane */
-	fn = fu_uefi_device_info_get_media_path (esp_path, self->info);
+	fn = fu_uefi_device_info_get_capsule_fn (info, esp_path);
 	if (!fu_common_mkdir_parent (fn, error))
 		return FALSE;
 	if (!fu_common_set_contents_bytes (fn, fw, error))
@@ -219,14 +220,14 @@ fu_uefi_device_write_firmware (FuDevice *device, GBytes *fw, GError **error)
 		return TRUE;
 
 	/* set efidp header */
-	if (!fu_uefi_device_info_set_device_path (self->info, fn, error))
+	if (!fu_uefi_device_info_set_capsule_fn (info, fn, error))
 		return FALSE;
 
 	/* save this to the hardware */
-	self->info->status = FWUPDATE_ATTEMPT_UPDATE;
-	self->info->capsule_flags = self->capsule_flags;
-	memset (&self->info->time_attempted, 0x0, sizeof(self->info->time_attempted));
-	if (!fu_uefi_device_info_update (self->info, error)) {
+	info->status = FWUPDATE_ATTEMPT_UPDATE;
+	info->capsule_flags = self->capsule_flags;
+	memset (&info->time_attempted, 0x0, sizeof(info->time_attempted));
+	if (!fu_uefi_device_info_update (info, error)) {
 		fu_uefi_prefix_efi_errors (error);
 		return FALSE;
 	}
@@ -250,7 +251,6 @@ fu_uefi_device_finalize (GObject *object)
 	FuUefiDevice *self = FU_UEFI_DEVICE (object);
 
 	g_free (self->fw_class);
-	fu_uefi_device_info_free (self->info);
 
 	G_OBJECT_CLASS (fu_uefi_device_parent_class)->finalize (object);
 }

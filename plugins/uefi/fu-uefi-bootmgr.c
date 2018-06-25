@@ -293,7 +293,7 @@ fu_uefi_copy_asset (const gchar *source, const gchar *target, GError **error)
 }
 
 gboolean
-fu_uefi_setup_bootnext (const gchar *esp_mountpoint, GError **error)
+fu_uefi_setup_bootnext (const gchar *esp_path, GError **error)
 {
 	gboolean use_fwup_path = FALSE;
 	gsize loader_sz = 0;
@@ -316,7 +316,7 @@ fu_uefi_setup_bootnext (const gchar *esp_mountpoint, GError **error)
 		return FALSE;
 
 	/* test to make sure shim is there if we need it */
-	shim_app = fu_uefi_get_esp_app_path (esp_mountpoint, "shim", error);
+	shim_app = fu_uefi_get_esp_app_path (esp_path, "shim", error);
 	if (shim_app == NULL)
 		return FALSE;
 	if (!g_file_test (shim_app, G_FILE_TEST_EXISTS)) {
@@ -331,7 +331,7 @@ fu_uefi_setup_bootnext (const gchar *esp_mountpoint, GError **error)
 	}
 
 	/* test if correct asset in place */
-	target_app = fu_uefi_get_esp_app_path (esp_mountpoint, "fwup", error);
+	target_app = fu_uefi_get_esp_app_path (esp_path, "fwup", error);
 	if (target_app == NULL)
 		return FALSE;
 	if (!fu_uefi_cmp_asset (source_app, target_app)) {
