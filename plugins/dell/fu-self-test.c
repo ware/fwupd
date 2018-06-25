@@ -47,7 +47,6 @@ _plugin_device_added_cb (FuPlugin *plugin, FuDevice *device, gpointer user_data)
 		if (device_alt != NULL)
 			fu_device_set_alternate (device, device_alt);
 	}
-	fu_device_set_metadata (device, "UEFI::FakeESP", "");
 	g_ptr_array_add (devices, g_object_ref (device));
 }
 
@@ -471,11 +470,16 @@ fu_plugin_dell_dock_func (void)
 int
 main (int argc, char **argv)
 {
-	g_autofree gchar *sysfsdir = fu_common_get_path (FU_PATH_KIND_SYSFSDIR_FW);
+	g_autofree gchar *sysfsdir = NULL;
 	g_test_init (&argc, &argv, NULL);
+
+	/* change path */
 	g_setenv ("FWUPD_SYSFSFWDIR", TESTDATADIR, TRUE);
-	g_setenv ("FWUPD_DELL_FAKE_SMBIOS", "1", FALSE);
+
+	/* change behaviour */
+	sysfsdir = fu_common_get_path (FU_PATH_KIND_SYSFSDIR_FW);
 	g_setenv ("FWUPD_UEFI_ESP_PATH", sysfsdir, TRUE);
+	g_setenv ("FWUPD_DELL_FAKE_SMBIOS", "1", FALSE);
 
 	/* only critical and error are fatal */
 	g_log_set_fatal_mask (NULL, G_LOG_LEVEL_ERROR | G_LOG_LEVEL_CRITICAL);

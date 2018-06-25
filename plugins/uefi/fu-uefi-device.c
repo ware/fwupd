@@ -9,14 +9,16 @@
 #include "config.h"
 
 #include <string.h>
+#include <efivar.h>
+#include <efivar/efiboot.h>
 
 #include "fu-device-metadata.h"
 
 #include "fu-uefi-bgrt.h"
 #include "fu-uefi-common.h"
 #include "fu-uefi-device.h"
-#include "fu-uefi-device-info.h"
 #include "fu-uefi-bootmgr.h"
+#include "fu-uefi-vars.h"
 
 struct _FuUefiDevice {
 	FuDevice		 parent_instance;
@@ -160,10 +162,36 @@ fu_uefi_device_get_guid (FuUefiDevice *self)
 	return self->fw_class;
 }
 
+static gchar *
+fu_uefi_device_build_varname (FuUefiDevice *self)
+{
+	return g_strdup_printf ("fwupdate-%s-%"G_GUINT64_FORMAT,
+				self->fw_class,
+				self->fmp_hardware_instance);
+}
+
+static gboolean
+fu_uefi_device_set_efivar (FuUefiDevice *self,
+			   const guint8 *data,
+			   gsize datasz,
+			   GError **error)
+{
+	g_autofree gchar *varname = fu_uefi_device_build_varname (self);
+	return fu_uefi_vars_set_data (FU_UEFI_VARS_GUID_FWUPDATE, varname,
+				      data, datasz,
+				      FU_UEFI_VARS_ATTR_NON_VOLATILE |
+				      FU_UEFI_VARS_ATTR_BOOTSERVICE_ACCESS |
+				      FU_UEFI_VARS_ATTR_RUNTIME_ACCESS,
+				      error);
+}
+
 gboolean
 fu_uefi_device_clear_status (FuUefiDevice *self, GError **error)
 {
-	g_autoptr(FuUefiDeviceInfo) info = NULL;
+	efi_update_info_t info;
+	gsize datasz = 0;
+	g_autofree gchar *varname = fu_uefi_device_build_varname (self);
+	g_autofree guint8 *data = NULL;
 
 	g_return_val_if_fail (FU_IS_UEFI_DEVICE (self), FALSE);
 	g_return_val_if_fail (error == NULL || *error == NULL, FALSE);
@@ -175,11 +203,75 @@ fu_uefi_device_clear_status (FuUefiDevice *self, GError **error)
 				     "cannot clear device info with no GUID");
 		return FALSE;
 	}
-	info = fu_uefi_device_info_new (self->fw_class, 0, error);
-	if (info == NULL)
+
+	/* get the existing status */
+	if (!fu_uefi_vars_get_data (FU_UEFI_VARS_GUID_FWUPDATE, varname,
+				    &data, &datasz, NULL, error))
 		return FALSE;
-	info->status = FU_UEFI_DEVICE_STATUS_SUCCESS;
-	return fu_uefi_device_info_update (info, error);
+	if (datasz < sizeof(info)) {
+		g_set_error (error,
+			     FWUPD_ERROR,
+			     FWUPD_ERROR_INTERNAL,
+			     "EFI variable %s is corrupt",
+			     varname);
+		return FALSE;
+	}
+
+	/* save it back */
+	memcpy (&info, data, sizeof(info));
+	info.status = FU_UEFI_DEVICE_STATUS_SUCCESS;
+	memcpy (data, &info, sizeof(info));
+	return fu_uefi_device_set_efivar (self, data, datasz, error);
+}
+
+static guint8 *
+fu_uefi_device_build_dp_buf (const gchar *path, gsize *bufsz, GError **error)
+{
+	gssize req;
+	gssize sz;
+	g_autofree guint8 *dp_buf = NULL;
+
+	/* get the size of the path first */
+	req = efi_generate_file_device_path (NULL, 0, path,
+					     EFIBOOT_OPTIONS_IGNORE_FS_ERROR |
+					     EFIBOOT_ABBREV_HD);
+	if (req < 0) {
+		g_set_error (error,
+			     FWUPD_ERROR,
+			     FWUPD_ERROR_NOT_SUPPORTED,
+			     "failed to efi_generate_file_device_path(%s)",
+			     path);
+		return FALSE;
+	}
+
+	/* if we just have an end device path, it's not going to work */
+	if (req <= 4) {
+		g_set_error (error,
+			     FWUPD_ERROR,
+			     FWUPD_ERROR_NOT_SUPPORTED,
+			     "failed to get valid device_path for (%s)",
+			     path);
+		return FALSE;
+	}
+
+	/* actually get the path this time */
+	dp_buf = g_malloc0 (req);
+	sz = efi_generate_file_device_path (dp_buf, req, path,
+					    EFIBOOT_OPTIONS_IGNORE_FS_ERROR |
+					    EFIBOOT_ABBREV_HD);
+	if (sz < 0) {
+		g_set_error (error,
+			     FWUPD_ERROR,
+			     FWUPD_ERROR_NOT_SUPPORTED,
+			     "failed to efi_generate_file_device_path(%s)",
+			     path);
+		return FALSE;
+	}
+
+	/* success */
+	if (bufsz != NULL)
+		*bufsz = sz;
+	return g_steal_pointer (&dp_buf);
 }
 
 static gboolean
@@ -187,47 +279,60 @@ fu_uefi_device_write_firmware (FuDevice *device, GBytes *fw, GError **error)
 {
 	FuUefiDevice *self = FU_UEFI_DEVICE (device);
 	const gchar *esp_path = fu_device_get_metadata (device, "EspPath");
+	efi_update_info_t info;
+	g_autofree gchar *basename = NULL;
+	g_autofree gchar *directory = NULL;
 	g_autofree gchar *fn = NULL;
-	g_autoptr(FuUefiDeviceInfo) info = NULL;
-
-
-	/* in the self tests */
-	if (fu_device_get_metadata (device, "UEFI::FakeESP") != NULL)
-		return TRUE;
+	g_autofree guint8 *data = NULL;
+	g_autofree guint8 *dp_buf = NULL;
+	gsize datasz = 0;
+	gsize dp_bufsz = 0;
 
 	/* ensure we have the existing state */
 	if (self->fw_class == NULL) {
 		g_set_error_literal (error,
 				     FWUPD_ERROR,
 				     FWUPD_ERROR_INTERNAL,
-				     "cannot clear device info with no GUID");
+				     "cannot update device info with no GUID");
 		return FALSE;
 	}
-	info = fu_uefi_device_info_new (self->fw_class, 0, error);
-	if (info == NULL)
-		return FALSE;
 
-	/* save the blob to either a filename that we've used before for this
-	 * GUID or construct something sane */
-	fn = fu_uefi_device_info_get_capsule_fn (info, esp_path);
+	/* save the blob to the ESP */
+	directory = fu_uefi_get_esp_path_for_os (esp_path);
+	basename = g_strdup_printf ("fwupdate-%s.cap", self->fw_class);
+	fn = g_build_filename (directory, "fw", basename, NULL);
 	if (!fu_common_mkdir_parent (fn, error))
 		return FALSE;
 	if (!fu_common_set_contents_bytes (fn, fw, error))
 		return FALSE;
 
-	/* self tests */
-	if (fu_device_get_metadata (device, "UEFI::FakeESP") != NULL)
-		return TRUE;
-
-	/* set efidp header */
-	if (!fu_uefi_device_info_set_capsule_fn (info, fn, error))
+	/* set the blob header shared with fwup.efi */
+	memset (&info, 0x0, sizeof(info));
+	info.status = FWUPDATE_ATTEMPT_UPDATE;
+	info.capsule_flags = self->capsule_flags;
+	if (efi_guid_to_str (&info.guid, &self->fw_class) < 0) {
+		g_set_error_literal (error,
+				     FWUPD_ERROR,
+				     FWUPD_ERROR_NOT_SUPPORTED,
+				     "failed to get convert GUID");
 		return FALSE;
+	}
 
-	/* save this to the hardware */
-	info->status = FWUPDATE_ATTEMPT_UPDATE;
-	info->capsule_flags = self->capsule_flags;
-	memset (&info->time_attempted, 0x0, sizeof(info->time_attempted));
-	if (!fu_uefi_device_info_update (info, error)) {
+	/* set the body as the device path */
+	if (g_getenv ("FWUPD_UEFI_ESP_PATH") == NULL) {
+		dp_buf = fu_uefi_device_build_dp_buf (fn, &dp_bufsz, error);
+		if (dp_buf == NULL) {
+			fu_uefi_prefix_efi_errors (error);
+			return FALSE;
+		}
+	}
+
+	/* save this header and body to the hardware */
+	datasz = sizeof(info) + dp_bufsz;
+	data = g_malloc0 (datasz);
+	memcpy (data, &info, sizeof(info));
+	memcpy (data + sizeof(info), dp_buf, dp_bufsz);
+	if (!fu_uefi_device_set_efivar (self, data, datasz, error)) {
 		fu_uefi_prefix_efi_errors (error);
 		return FALSE;
 	}

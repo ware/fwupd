@@ -339,6 +339,10 @@ fu_uefi_setup_bootnext (const gchar *esp_path, GError **error)
 			return FALSE;
 	}
 
+	/* skip for self tests */
+	if (g_getenv ("FWUPD_UEFI_ESP_PATH") != NULL)
+		return TRUE;
+
 	sz = efi_generate_file_device_path (dp_buf, dp_size, use_fwup_path
 							    ? target_app
 							    : shim_app,

@@ -38,11 +38,20 @@ G_BEGIN_DECLS
 #define CAPSULE_FLAGS_INITIATE_RESET		0x00040000
 
 typedef struct {
-       efi_guid_t guid;
-       guint32 header_size;
-       guint32 flags;
-       guint32 capsule_image_size;
+	efi_guid_t	 guid;
+	guint32		 header_size;
+	guint32		 flags;
+	guint32		 capsule_image_size;
 } efi_capsule_header_t;
+
+typedef struct  __attribute__((__packed__)) {
+	guint32		 update_info_version;
+	efi_guid_t	 guid;
+	guint32		 capsule_flags;
+	guint64		 hw_inst;
+	efi_time_t	 time_attempted;
+	guint32		 status;
+} efi_update_info_t;
 
 gchar		*fu_uefi_get_esp_app_path	(const gchar	*esp_path,
 						 const gchar	*cmd,

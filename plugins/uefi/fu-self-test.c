@@ -15,7 +15,6 @@
 #include "fu-uefi-bgrt.h"
 #include "fu-uefi-common.h"
 #include "fu-uefi-device.h"
-#include "fu-uefi-device-info.h"
 #include "fu-uefi-vars.h"
 
 static void
@@ -213,74 +212,19 @@ fu_uefi_plugin_func (void)
 	g_assert_cmpint (fu_uefi_device_get_status (dev), ==, FU_UEFI_DEVICE_STATUS_SUCCESS);
 }
 
-static void
-fu_uefi_device_info_func (void)
-{
-//	gboolean ret;
-	g_autofree gchar *capsule_fn2 = NULL;
-	g_autofree gchar *capsule_fn = NULL;
-	g_autofree gchar *capsule_fn_old = NULL;
-	g_autofree gchar *capsule_fn_os = NULL;
-	g_autofree gchar *capsule_fn_tmp = NULL;
-	g_autoptr(FuUefiDeviceInfo) info2 = NULL;
-	g_autoptr(FuUefiDeviceInfo) info = NULL;
-	g_autoptr(GError) error = NULL;
-
-	/* ensure clean */
-	fu_uefi_vars_delete (FU_UEFI_VARS_GUID_FWUPDATE,
-			     "fwupdate-ddc0ee61-e7f0-4e7d-acc5-c070a398838e-0",
-			     NULL);
-
-	/* this isn't going to exist, so create it */
-	info = fu_uefi_device_info_new ("ddc0ee61-e7f0-4e7d-acc5-c070a398838e",
-					0 /* hw-inst */, &error);
-	g_assert_no_error (error);
-	g_assert_nonnull (info);
-	g_assert_cmpint (info->status, ==, 0);
-	g_assert_cmpint (info->hw_inst, ==, 0);
-
-	/* get the esp filename */
-	capsule_fn = fu_uefi_device_info_get_capsule_fn (info, TESTDATADIR);
-	capsule_fn_os = fu_uefi_get_esp_path_for_os (TESTDATADIR);
-	capsule_fn_tmp = g_build_filename (capsule_fn_os, "fw",
-					   "fwupdate-ddc0ee61-e7f0-4e7d-acc5-c070a398838e.cap",
-					   NULL);
-	g_assert_cmpstr (capsule_fn, ==, capsule_fn_tmp);
-
-#if 0
-	/* set a new device path */
-	capsule_fn_old = g_build_filename (capsule_fn_os, "fw", "old.cap", NULL);
-	ret = fu_uefi_device_info_set_capsule_fn (info, capsule_fn_old, &error);
-	g_assert_no_error (error);
-	g_assert_true (ret);
-	ret = fu_uefi_device_info_update (info, &error);
-	g_assert_no_error (error);
-	g_assert_true (ret);
-
-	/* get the saved device path */
-	info2 = fu_uefi_device_info_new ("ddc0ee61-e7f0-4e7d-acc5-c070a398838e",
-					 0 /* hw-inst */, &error);
-	g_assert_no_error (error);
-	g_assert_nonnull (info2);
-	capsule_fn2 = fu_uefi_device_info_get_capsule_fn (info2, TESTDATADIR);
-	g_assert_cmpstr (capsule_fn2, ==, capsule_fn_old);
-
-	/* delete the saved mapping */
-	ret = fu_uefi_vars_delete (FU_UEFI_VARS_GUID_FWUPDATE,
-				   "fwupdate-ddc0ee61-e7f0-4e7d-acc5-c070a398838e-0",
-				   &error);
-	g_assert_no_error (error);
-	g_assert_true (ret);
-
-#endif
-}
-
 int
 main (int argc, char **argv)
 {
+	g_autofree gchar *sysfsdir = NULL;
 	g_test_init (&argc, &argv, NULL);
+
+	/* change path */
 	g_setenv ("FWUPD_SYSFSFWDIR", TESTDATADIR, TRUE);
 	g_setenv ("FWUPD_SYSFSDRIVERDIR", TESTDATADIR, TRUE);
+
+	/* change behaviour */
+	sysfsdir = fu_common_get_path (FU_PATH_KIND_SYSFSDIR_FW);
+	g_setenv ("FWUPD_UEFI_ESP_PATH", sysfsdir, TRUE);
 
 	/* only critical and error are fatal */
 	g_log_set_fatal_mask (NULL, G_LOG_LEVEL_ERROR | G_LOG_LEVEL_CRITICAL);
@@ -292,7 +236,6 @@ main (int argc, char **argv)
 	g_test_add_func ("/uefi/framebuffer", fu_uefi_framebuffer_func);
 	g_test_add_func ("/uefi/bitmap", fu_uefi_bitmap_func);
 	g_test_add_func ("/uefi/device", fu_uefi_device_func);
-	g_test_add_func ("/uefi/device-info", fu_uefi_device_info_func);
 	g_test_add_func ("/uefi/plugin", fu_uefi_plugin_func);
 	return g_test_run ();
 }

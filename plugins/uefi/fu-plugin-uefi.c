@@ -21,7 +21,6 @@
 #include "fu-uefi-bgrt.h"
 #include "fu-uefi-common.h"
 #include "fu-uefi-device.h"
-#include "fu-uefi-device-info.h"
 #include "fu-uefi-vars.h"
 
 struct FuPluginData {
@@ -181,11 +180,9 @@ fu_plugin_uefi_write_splash_data (FuPlugin *plugin, GBytes *blob, GError **error
 		.header_size = sizeof(efi_capsule_header_t),
 		.capsule_image_size = 0
 	};
-	FuUefiDeviceInfo info = {
-		.dp_ptr = NULL,
-		.guid = efi_guid_ux_capsule,
-	};
 	g_autofree gchar *fn = NULL;
+	g_autofree gchar *directory = NULL;
+	g_autofree gchar *basename = NULL;
 	g_autoptr(GFile) ofile = NULL;
 	g_autoptr(GOutputStream) ostream = NULL;
 
@@ -199,7 +196,11 @@ fu_plugin_uefi_write_splash_data (FuPlugin *plugin, GBytes *blob, GError **error
 	}
 
 	/* save to a predicatable filename */
-	fn = fu_uefi_device_info_get_capsule_fn (&info, data->esp_path);
+	directory = fu_uefi_get_esp_path_for_os (data->esp_path);
+	basename = g_strdup_printf ("fwupdate-%s.cap", FU_UEFI_VARS_GUID_UX_CAPSULE);
+	fn = g_build_filename (directory, "fw", basename, NULL);
+	if (!fu_common_mkdir_parent (fn, error))
+		return FALSE;
 	ofile = g_file_new_for_path (fn);
 	ostream = G_OUTPUT_STREAM (g_file_replace (ofile, NULL, FALSE, G_FILE_CREATE_NONE, NULL, error));
 	if (ostream == NULL)
@@ -229,7 +230,7 @@ fu_plugin_uefi_write_splash_data (FuPlugin *plugin, GBytes *blob, GError **error
 	if (size < 0)
 		return FALSE;
 
-	//FIXME: don't we have to set efidp header()?
+	/* success */
 	return TRUE;
 }
 
@@ -367,7 +368,7 @@ fu_plugin_update (FuPlugin *plugin,
 	g_assert (str != NULL);
 
 	/* make sure that the ESP is mounted */
-	if (fu_device_get_metadata (device, "UEFI::FakeESP") == NULL) {
+	if (g_getenv ("FWUPD_UEFI_ESP_PATH") == NULL) {
 		if (!fu_plugin_uefi_esp_mounted (plugin, error))
 			return FALSE;
 	}
