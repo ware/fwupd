@@ -14,8 +14,6 @@
 
 G_BEGIN_DECLS
 
-#define FWUPDATE_GUID EFI_GUID(0x0abba7dc,0xe516,0x4167,0xbbf5,0x4d,0x9d,0x1c,0x73,0x94,0x16)
-
 #define EFI_CAPSULE_HEADER_FLAGS_PERSIST_ACROSS_RESET	0x00010000
 #define EFI_CAPSULE_HEADER_FLAGS_POPULATE_SYSTEM_TABLE	0x00020000
 #define EFI_CAPSULE_HEADER_FLAGS_INITIATE_RESET		0x00040000
@@ -23,7 +21,7 @@ G_BEGIN_DECLS
 #define EFI_UPDATE_INFO_STATUS_ATTEMPT_UPDATE		0x00000001
 #define EFI_UPDATE_INFO_STATUS_ATTEMPTED		0x00000002
 
-typedef struct  __attribute__((__packed__)) {
+typedef struct __attribute__((__packed__)) {
 	guint16		 year;
 	guint8		 month;
 	guint8		 day;

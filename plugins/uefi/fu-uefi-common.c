@@ -16,6 +16,7 @@
 #include "fu-uefi-vars.h"
 
 #include "fwupd-common.h"
+#include "fwupd-error.h"
 
 static const gchar *
 fu_uefi_bootmgr_get_suffix (GError **error)

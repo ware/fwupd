@@ -13,7 +13,6 @@
 #include <fnmatch.h>
 #include <gio/gunixmounts.h>
 #include <glib/gi18n.h>
-#include <efivar.h>
 
 #include "fu-plugin.h"
 #include "fu-plugin-vfuncs.h"

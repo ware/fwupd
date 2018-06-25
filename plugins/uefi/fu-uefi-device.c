@@ -14,7 +14,6 @@
 
 #include "fu-device-metadata.h"
 
-#include "fu-uefi-bgrt.h"
 #include "fu-uefi-common.h"
 #include "fu-uefi-device.h"
 #include "fu-uefi-bootmgr.h"
