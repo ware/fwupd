@@ -310,6 +310,7 @@ fu_plugin_update (FuPlugin *plugin,
 	const gchar *aux_node;
 	guint8 layer;
 	guint8 rad;
+	g_autoptr(GTimer) timer = g_timer_new ();
 
 	/* extract details to build a new device */
 	kind = synapticsmst_device_kind_from_string (fu_device_get_metadata (dev, "SynapticsMSTKind"));
@@ -353,6 +354,9 @@ fu_plugin_update (FuPlugin *plugin,
 		return FALSE;
 	}
 	fu_device_set_version (dev, synapticsmst_device_get_version (device));
+
+	g_debug ("Updating %s took %f seconds", fu_device_get_name (dev),
+		 g_timer_elapsed (timer, NULL));
 
 	return TRUE;
 }
