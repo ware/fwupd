@@ -29,7 +29,7 @@ def parse_control_dependencies(requested_type):
         import platform
         SUBOS = platform.machine()
 
-    tree = etree.parse(os.path.join(directory, "dependencies.xml"))
+    tree = etree.parse(os.path.join(os.path.dirname (sys.argv[0]), "dependencies.xml"))
     root = tree.getroot()
     for child in root:
         if not "type" in child.attrib or not "id" in child.attrib:
@@ -80,28 +80,76 @@ def parse_control_dependencies(requested_type):
                     deps.append(dep)
     return deps
 
-directory = os.path.dirname(sys.argv[0])
-if (len(sys.argv) < 3):
-    print("Missing input and output file")
-    sys.exit(1)
+def update_debian_control(target):
+    control_in = os.path.join(target, 'control.in')
+    control_out = os.path.join(target, 'control')
 
-deps = parse_control_dependencies("build")
+    if not os.path.exists(control_in):
+        print("Missing file %s" % control_in)
+        sys.exit(1)
 
-input = sys.argv[1]
-if not os.path.exists(input):
-    print("Missing input file %s" % input)
-    sys.exit(1)
+    with open(control_in, 'r') as rfd:
+        lines = rfd.readlines()
 
-with open(input, 'r') as rfd:
-    lines = rfd.readlines()
+    deps = parse_control_dependencies("build")
+    deps.sort()
+    with open(control_out, 'w') as wfd:
+        for line in lines:
+            if line.startswith("Build-Depends: %%%DYNAMIC%%%"):
+                wfd.write("Build-Depends:\n")
+                for i in range(0, len(deps)):
+                    wfd.write("\t%s,\n" % deps[i])
+            else:
+                wfd.write(line)
 
-deps.sort()
-output = sys.argv[2]
-with open(output, 'w') as wfd:
-    for line in lines:
-        if line.startswith("Build-Depends: %%%DYNAMIC%%%"):
-            wfd.write("Build-Depends:\n")
-            for i in range(0, len(deps)):
-                wfd.write("\t%s,\n" % deps[i])
-        else:
-            wfd.write(line)
+def update_debian_copyright (directory):
+    copyright_in = os.path.join(directory, 'copyright.in')
+    copyright_out = os.path.join(directory, 'copyright')
+
+    if not os.path.exists(copyright_in):
+        print("Missing file %s" % copyright_in)
+        sys.exit(1)
+
+    license_matches = {}
+    copyright_matches = {}
+    for root, dirs, files in os.walk('.'):
+        for file in files:
+            license = ''
+            copyright = []
+            target = os.path.join (root, file)
+            try:
+                with open(target, 'r') as rfd:
+                    lines = rfd.readlines()
+            except UnicodeDecodeError:
+                continue
+            for line in lines:
+                if 'SPDX-License-Identifier' in line:
+                    license = line.split (':')[1].strip()
+                if 'Copyright' in line:
+                    parts = line.partition ('Copyright')
+                    copyright += ["%s %s" % (parts[1], parts[2].strip())]
+                if license and copyright:
+                    break
+            if license and copyright:
+                license_matches [target] = license
+                copyright_matches [target] = copyright
+                license = ''
+
+    with open(copyright_in, 'r') as rfd:
+        lines = rfd.readlines()
+
+    with open(copyright_out, 'w') as wfd:
+        for line in lines:
+            if line.startswith("%%%DYNAMIC%%%"):
+                for i in license_matches:
+                    wfd.write("Files: %s\n" % i)
+                    for holder in copyright_matches[i]:
+                        wfd.write("Copyright: %s\n" % holder)
+                    wfd.write("License: %s\n" % license_matches[i])
+                    wfd.write("\n")
+            else:
+                wfd.write(line)
+
+directory = os.path.join (os.getcwd(), 'debian')
+update_debian_control(directory)
+update_debian_copyright(directory)
