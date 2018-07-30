@@ -110,6 +110,7 @@ def update_debian_copyright (directory):
         print("Missing file %s" % copyright_in)
         sys.exit(1)
 
+    # find license on all files
     license_matches = {}
     copyright_matches = {}
     for root, dirs, files in os.walk('.'):
@@ -125,9 +126,10 @@ def update_debian_copyright (directory):
             for line in lines:
                 if 'SPDX-License-Identifier' in line:
                     license = line.split (':')[1].strip()
-                if 'Copyright' in line:
-                    parts = line.partition ('Copyright')
-                    copyright += ["%s %s" % (parts[1], parts[2].strip())]
+                if 'Copyright (C) ' in line:
+                    parts = line.split ('Copyright (C)')[1].strip() #split out the copyright header
+                    partition = parts.partition(' ')[2] # remove the year string
+                    copyright += ["%s" % partition]
                 if license and copyright:
                     break
             if license and copyright:
@@ -135,17 +137,29 @@ def update_debian_copyright (directory):
                 copyright_matches [target] = copyright
                 license = ''
 
+    # group files together by directory
+    directory_license = {}
+    directory_copyright = {}
+    for i in license_matches:
+        directory = os.path.dirname (i)
+        if directory not in directory_license:
+            directory_license [directory] = license_matches [i]
+        if directory not in directory_copyright:
+            directory_copyright [directory] = copyright_matches [i]
+        else:
+            directory_copyright [directory] += copyright_matches [i]
+
     with open(copyright_in, 'r') as rfd:
         lines = rfd.readlines()
 
     with open(copyright_out, 'w') as wfd:
         for line in lines:
             if line.startswith("%%%DYNAMIC%%%"):
-                for i in license_matches:
-                    wfd.write("Files: %s\n" % i)
-                    for holder in copyright_matches[i]:
+                for i in directory_license:
+                    wfd.write("Files: %s/*\n" % i)
+                    for holder in set(directory_copyright[i]):
                         wfd.write("Copyright: %s\n" % holder)
-                    wfd.write("License: %s\n" % license_matches[i])
+                    wfd.write("License: %s\n" % directory_license[i])
                     wfd.write("\n")
             else:
                 wfd.write(line)
