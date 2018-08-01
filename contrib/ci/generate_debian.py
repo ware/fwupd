@@ -120,7 +120,8 @@ def update_debian_copyright (directory):
             target = os.path.join (root, file)
             try:
                 with open(target, 'r') as rfd:
-                    lines = rfd.readlines()
+                    #read about the first few lines of the file only
+                    lines = rfd.readlines(220)
             except UnicodeDecodeError:
                 continue
             for line in lines:
@@ -141,13 +142,24 @@ def update_debian_copyright (directory):
     directory_license = {}
     directory_copyright = {}
     for i in license_matches:
-        directory = os.path.dirname (i)
+        directory = "%s/" % os.path.dirname (i)
         if directory not in directory_license:
             directory_license [directory] = license_matches [i]
         if directory not in directory_copyright:
             directory_copyright [directory] = copyright_matches [i]
         else:
             directory_copyright [directory] += copyright_matches [i]
+
+    #collapse all directories with common licenses
+    for i in directory_copyright:
+        for j in directory_copyright:
+            if i == j:
+                continue
+            if j in i:
+                print ("%s is in %s" % (j, i))
+                if directory_copyright[i] == directory_copyright [j]:
+                    directory_copyright[i] = None
+                    directory_license[i] = None
 
     with open(copyright_in, 'r') as rfd:
         lines = rfd.readlines()
@@ -156,7 +168,9 @@ def update_debian_copyright (directory):
         for line in lines:
             if line.startswith("%%%DYNAMIC%%%"):
                 for i in directory_license:
-                    wfd.write("Files: %s/*\n" % i)
+                    if not directory_license[i]:
+                        continue
+                    wfd.write("Files: %s*\n" % i)
                     for holder in set(directory_copyright[i]):
                         wfd.write("Copyright: %s\n" % holder)
                     wfd.write("License: %s\n" % directory_license[i])
